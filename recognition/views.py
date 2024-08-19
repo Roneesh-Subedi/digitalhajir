@@ -173,36 +173,30 @@ def vizualize_Data(embedded, targets,):
 
 
 def update_attendance_in_db_in(present):
-	today=datetime.date.today()
-	time=datetime.datetime.now()
-	for person in present:
-		user=User.objects.get(username=person)
-		try:
-		   qs=Present.objects.get(user=user,date=today)
-		except :
-			qs= None
-		
-		if qs is None:
-			if present[person]==True:
-						a=Present(user=user,date=today,present=True)
-						a.save()
-			else:
-				a=Present(user=user,date=today,present=False)
-				a.save()
-		else:
-			if present[person]==True:
-				qs.present=True
-				qs.save(update_fields=['present'])
-		if present[person]==True:
-			a=Time(user=user,date=today,time=time, out=False)
-			a.save()
+    today = datetime.date.today()
+    time = datetime.datetime.now()
+    for person in present:
+        user = User.objects.get(username=person)
+        try:
+            qs = Present.objects.get(user=user, date=today)
+        except:
+            qs = None
 
+        if qs is None:
+            if present[person] == True:
+                a = Present(user=user, date=today, present=True)
+                a.save()
+            else:
+                a = Present(user=user, date=today, present=False)
+                a.save()
+        else:
+            if present[person] == True:
+                qs.present = True
+                qs.save(update_fields=['present'])
 
-			
-		
-
-
-
+        if present[person] == True:
+            a = Time(user=user, date=today, time=time, out=False)
+            a.save()
 
 def update_attendance_in_db_out(present):
 	today=datetime.date.today()
@@ -575,224 +569,141 @@ def add_photos(request):
 
 
 def mark_your_attendance(request):
-	
-	
+    detector = dlib.get_frontal_face_detector()
+    predictor = dlib.shape_predictor('face_recognition_data/shape_predictor_68_face_landmarks.dat')   # Add path to the shape predictor ######CHANGE TO RELATIVE PATH LATER
+    svc_save_path = "face_recognition_data/svc.sav"
 
-	
-	detector = dlib.get_frontal_face_detector()
-	
-	predictor = dlib.shape_predictor('face_recognition_data/shape_predictor_68_face_landmarks.dat')   #Add path to the shape predictor ######CHANGE TO RELATIVE PATH LATER
-	svc_save_path="face_recognition_data/svc.sav"	
+    with open(svc_save_path, 'rb') as f:
+        svc = pickle.load(f)
+    
+    fa = FaceAligner(predictor, desiredFaceWidth=96)
+    encoder = LabelEncoder()
+    encoder.classes_ = np.load('face_recognition_data/classes.npy')
 
+    faces_encodings = np.zeros((1, 128))
+    no_of_faces = len(svc.predict_proba(faces_encodings)[0])
+    count = dict()
+    present = dict()
+    log_time = dict()
+    start = dict()
+    
+    for i in range(no_of_faces):
+        count[encoder.inverse_transform([i])[0]] = 0
+        present[encoder.inverse_transform([i])[0]] = False
 
-		
-			
-	with open(svc_save_path, 'rb') as f:
-			svc = pickle.load(f)
-	fa = FaceAligner(predictor , desiredFaceWidth = 96)
-	encoder=LabelEncoder()
-	encoder.classes_ = np.load('face_recognition_data/classes.npy')
+    vs = VideoStream(src=0).start()
+    sampleNum = 0
 
+    while True:
+        frame = vs.read()
+        frame = imutils.resize(frame, width=800)
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = detector(gray_frame, 0)
 
-	faces_encodings = np.zeros((1,128))
-	no_of_faces = len(svc.predict_proba(faces_encodings)[0])
-	count = dict()
-	present = dict()
-	log_time = dict()
-	start = dict()
-	for i in range(no_of_faces):
-		count[encoder.inverse_transform([i])[0]] = 0
-		present[encoder.inverse_transform([i])[0]] = False
+        for face in faces:
+            print("INFO : inside for loop")
+            (x, y, w, h) = face_utils.rect_to_bb(face)
+            face_aligned = fa.align(frame, gray_frame, face)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 1)
+            (pred, prob) = predict(face_aligned, svc)
 
-	
+            if pred != [-1]:
+                person_name = encoder.inverse_transform(np.ravel([pred]))[0]
+                pred = person_name
+                if count[pred] == 0:
+                    start[pred] = time.time()
+                    count[pred] = count.get(pred, 0) + 1
 
-	vs = VideoStream(src=0).start()
-	
-	sampleNum = 0
-	
-	while(True):
-		
-		frame = vs.read()
-		
-		frame = imutils.resize(frame ,width = 800)
-		
-		gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-		
-		faces = detector(gray_frame,0)
-		
-		
+                if count[pred] == 4 and (time.time() - start[pred]) > 1.2:
+                    count[pred] = 0
+                else:
+                    present[pred] = True
+                    log_time[pred] = datetime.datetime.now()
+                    count[pred] = count.get(pred, 0) + 1
+                    print(pred, present[pred], count[pred])
+                cv2.putText(frame, str(person_name) + str(prob), (x+6, y+h-6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            else:
+                person_name = "unknown"
+                cv2.putText(frame, str(person_name), (x+6, y+h-6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
+        cv2.imshow("Mark Attendance - In - Press q to exit", frame)
+        key = cv2.waitKey(50) & 0xFF
+        if key == ord("q"):
+            break
 
-		for face in faces:
-			print("INFO : inside for loop")
-			(x,y,w,h) = face_utils.rect_to_bb(face)
-
-			face_aligned = fa.align(frame,gray_frame,face)
-			cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),1)
-					
-			
-			(pred,prob)=predict(face_aligned,svc)
-			
-
-			
-			if(pred!=[-1]):
-				
-				person_name=encoder.inverse_transform(np.ravel([pred]))[0]
-				pred=person_name
-				if count[pred] == 0:
-					start[pred] = time.time()
-					count[pred] = count.get(pred,0) + 1
-
-				if count[pred] == 4 and (time.time()-start[pred]) > 1.2:
-					 count[pred] = 0
-				else:
-				#if count[pred] == 4 and (time.time()-start) <= 1.5:
-					present[pred] = True
-					log_time[pred] = datetime.datetime.now()
-					count[pred] = count.get(pred,0) + 1
-					print(pred, present[pred], count[pred])
-				cv2.putText(frame, str(person_name)+ str(prob), (x+6,y+h-6), cv2.FONT_HERSHEY_SIMPLEX,0.5,(0,255,0),1)
-
-			else:
-				person_name="unknown"
-				cv2.putText(frame, str(person_name), (x+6,y+h-6), cv2.FONT_HERSHEY_SIMPLEX,0.5,(0,255,0),1)
-
-			
-			
-			#cv2.putText()
-			# Before continuing to the next loop, I want to give it a little pause
-			# waitKey of 100 millisecond
-			#cv2.waitKey(50)
-
-		#Showing the image in another window
-		#Creates a window with window name "Face" and with the image img
-		cv2.imshow("Mark Attendance - In - Press q to exit",frame)
-		#Before closing it we need to give a wait command, otherwise the open cv wont work
-		# @params with the millisecond of delay 1
-		#cv2.waitKey(1)
-		#To get out of the loop
-		key=cv2.waitKey(50) & 0xFF
-		if(key==ord("q")):
-			break
-	
-	#Stoping the videostream
-	vs.stop()
-
-	# destroying all the windows
-	cv2.destroyAllWindows()
-	update_attendance_in_db_in(present)
-	return redirect('home')
-
+    vs.stop()
+    cv2.destroyAllWindows()
+    update_attendance_in_db_in(present)
+    return redirect('home')
 
 
 def mark_your_attendance_out(request):
-	
+    detector = dlib.get_frontal_face_detector()
+    predictor = dlib.shape_predictor('face_recognition_data/shape_predictor_68_face_landmarks.dat')   # Add path to the shape predictor ######CHANGE TO RELATIVE PATH LATER
+    svc_save_path = "face_recognition_data/svc.sav"
 
-	
-	detector = dlib.get_frontal_face_detector()
-	
-	predictor = dlib.shape_predictor('face_recognition_data/shape_predictor_68_face_landmarks.dat')   #Add path to the shape predictor ######CHANGE TO RELATIVE PATH LATER
-	svc_save_path="face_recognition_data/svc.sav"	
+    with open(svc_save_path, 'rb') as f:
+        svc = pickle.load(f)
+    
+    fa = FaceAligner(predictor, desiredFaceWidth=96)
+    encoder = LabelEncoder()
+    encoder.classes_ = np.load('face_recognition_data/classes.npy')
 
+    faces_encodings = np.zeros((1, 128))
+    no_of_faces = len(svc.predict_proba(faces_encodings)[0])
+    count = dict()
+    present = dict()
+    log_time = dict()
+    start = dict()
+    
+    for i in range(no_of_faces):
+        count[encoder.inverse_transform([i])[0]] = 0
+        present[encoder.inverse_transform([i])[0]] = False
 
-		
-			
-	with open(svc_save_path, 'rb') as f:
-			svc = pickle.load(f)
-	fa = FaceAligner(predictor , desiredFaceWidth = 96)
-	encoder=LabelEncoder()
-	encoder.classes_ = np.load('face_recognition_data/classes.npy')
+    vs = VideoStream(src=0).start()
+    sampleNum = 0
 
+    while True:
+        frame = vs.read()
+        frame = imutils.resize(frame, width=800)
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = detector(gray_frame, 0)
 
-	faces_encodings = np.zeros((1,128))
-	no_of_faces = len(svc.predict_proba(faces_encodings)[0])
-	count = dict()
-	present = dict()
-	log_time = dict()
-	start = dict()
-	for i in range(no_of_faces):
-		count[encoder.inverse_transform([i])[0]] = 0
-		present[encoder.inverse_transform([i])[0]] = False
+        for face in faces:
+            print("INFO : inside for loop")
+            (x, y, w, h) = face_utils.rect_to_bb(face)
+            face_aligned = fa.align(frame, gray_frame, face)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 1)
+            (pred, prob) = predict(face_aligned, svc)
 
-	
+            if pred != [-1]:
+                person_name = encoder.inverse_transform(np.ravel([pred]))[0]
+                pred = person_name
+                if count[pred] == 0:
+                    start[pred] = time.time()
+                    count[pred] = count.get(pred, 0) + 1
 
-	vs = VideoStream(src=0).start()
-	
-	sampleNum = 0
-	
-	while(True):
-		
-		frame = vs.read()
-		
-		frame = imutils.resize(frame ,width = 800)
-		
-		gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-		
-		faces = detector(gray_frame,0)
-		
-		
+                if count[pred] == 4 and (time.time() - start[pred]) > 1.5:
+                    count[pred] = 0
+                else:
+                    present[pred] = True
+                    log_time[pred] = datetime.datetime.now()
+                    count[pred] = count.get(pred, 0) + 1
+                    print(pred, present[pred], count[pred])
+                cv2.putText(frame, str(person_name) + str(prob), (x+6, y+h-6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            else:
+                person_name = "unknown"
+                cv2.putText(frame, str(person_name), (x+6, y+h-6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
+        cv2.imshow("Mark Attendance - Out - Press q to exit", frame)
+        key = cv2.waitKey(50) & 0xFF
+        if key == ord("q"):
+            break
 
-		for face in faces:
-			print("INFO : inside for loop")
-			(x,y,w,h) = face_utils.rect_to_bb(face)
-
-			face_aligned = fa.align(frame,gray_frame,face)
-			cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),1)
-					
-			
-			(pred,prob)=predict(face_aligned,svc)
-			
-
-			
-			if(pred!=[-1]):
-				
-				person_name=encoder.inverse_transform(np.ravel([pred]))[0]
-				pred=person_name
-				if count[pred] == 0:
-					start[pred] = time.time()
-					count[pred] = count.get(pred,0) + 1
-
-				if count[pred] == 4 and (time.time()-start[pred]) > 1.5:
-					 count[pred] = 0
-				else:
-				#if count[pred] == 4 and (time.time()-start) <= 1.5:
-					present[pred] = True
-					log_time[pred] = datetime.datetime.now()
-					count[pred] = count.get(pred,0) + 1
-					print(pred, present[pred], count[pred])
-				cv2.putText(frame, str(person_name)+ str(prob), (x+6,y+h-6), cv2.FONT_HERSHEY_SIMPLEX,0.5,(0,255,0),1)
-
-			else:
-				person_name="unknown"
-				cv2.putText(frame, str(person_name), (x+6,y+h-6), cv2.FONT_HERSHEY_SIMPLEX,0.5,(0,255,0),1)
-
-			
-			
-			#cv2.putText()
-			# Before continuing to the next loop, I want to give it a little pause
-			# waitKey of 100 millisecond
-			#cv2.waitKey(50)
-
-		#Showing the image in another window
-		#Creates a window with window name "Face" and with the image img
-		cv2.imshow("Mark Attendance- Out - Press q to exit",frame)
-		#Before closing it we need to give a wait command, otherwise the open cv wont work
-		# @params with the millisecond of delay 1
-		#cv2.waitKey(1)
-		#To get out of the loop
-		key=cv2.waitKey(50) & 0xFF
-		if(key==ord("q")):
-			break
-	
-	#Stoping the videostream
-	vs.stop()
-
-	# destroying all the windows
-	cv2.destroyAllWindows()
-	update_attendance_in_db_out(present)
-	return redirect('home')
-
+    vs.stop()
+    cv2.destroyAllWindows()
+    update_attendance_in_db_out(present)
+    return redirect('home')
 
 
 

@@ -1,0 +1,15 @@
+Django
+dlib
+opencv-python
+imutils
+face_recognition
+scikit-learn
+numpy
+pandas
+matplotlib
+seaborn
+django-pandas
+face_recognition_models
+face_recognition
+
+
